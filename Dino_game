@@ -1,0 +1,209 @@
+#define SAMPLE_RATE 128
+#define BAUD_RATE 115200
+#define INPUT_PIN A0
+
+
+const int Threshold = 45;
+float signal;  // Global signal variable
+
+
+void setup() {
+
+
+    Serial.begin(BAUD_RATE);
+}
+
+
+void loop() {
+    static unsigned long past = 0;
+    unsigned long present = micros();
+    unsigned long interval = present - past;
+    past = present;
+
+
+    static long timer = 0;
+    timer -= interval;
+
+
+    static float sum_of_squares = 0;
+    static int sample_count = 0;
+
+
+    if (timer < 0) {
+        timer += 1000000 / SAMPLE_RATE;
+        float sensor_value = analogRead(INPUT_PIN);
+
+
+        signal = EEGFilter(sensor_value);
+
+
+        Serial.println(signal);
+    }
+    if (signal > Threshold) {
+        Serial.println("jump");
+        delay(10);
+    } else {
+        delay(10);
+    }
+}
+
+
+float EEGFilter(float input) {
+    float output = input;
+    {
+        static float z1, z2; // filter section state
+        float x = output - -0.95391350 * z1 - 0.25311356 * z2;
+        output = 0.00735282 * x + 0.01470564 * z1 + 0.00735282 * z2;
+        z2 = z1;
+        z1 = x;
+    }
+    {
+        static float z1, z2; // filter section state
+        float x = output - -1.20596630 * z1 - 0.60558332 * z2;
+        output = 1.00000000 * x + 2.00000000 * z1 + 1.00000000 * z2;
+        z2 = z1;
+        z1 = x;
+    }
+    {
+        static float z1, z2; // filter section state
+        float x = output - -1.97690645 * z1 - 0.97706395 * z2;
+        output = 1.00000000 * x + -2.00000000 * z1 + 1.00000000 * z2;
+        z2 = z1;
+        z1 = x;
+    }
+    {
+        static float z1, z2; // filter section state
+        float x = output - -1.99071687 * z1 - 0.99086813 * z2;
+        output = 1.00000000 * x + -2.00000000 * z1 + 1.00000000 * z2;
+        z2 = z1;
+        z1 = x;
+    }
+    return output;
+}
+
+
+//Python code
+
+import pygame
+import random
+import serial
+
+
+# Initialize serial communication with Arduino
+try:
+    arduino = serial.Serial(port='COM7', baudrate=115200, timeout=0)  # Replace 'COM4' with your port
+    print(f"Connected to {arduino.port}")
+except Exception as e:
+    arduino = None
+    print(f"Error: Could not connect to Arduino. Details: {e}")
+
+# Initialize Pygame
+pygame.init()
+
+# Screen dimensions
+SCREEN_WIDTH, SCREEN_HEIGHT = 800, 400
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("Dino Game with Arduino Control")
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
+# Clock and FPS
+clock = pygame.time.Clock()
+FPS = 60
+
+# Dino settings
+dino_img = pygame.image.load("dino_placeholder.png")
+dino_rect = dino_img.get_rect(midbottom=(80, SCREEN_HEIGHT - 40))
+dino_gravity = 0
+
+# Obstacle settings
+cactus_img = pygame.image.load("cactus_placeholder.png")
+cactus_rect = cactus_img.get_rect(midbottom=(SCREEN_WIDTH + 100, SCREEN_HEIGHT - 40))
+cactus_speed = 2
+
+# Font
+font = pygame.font.Font(None, 36)
+
+# Game variables
+game_active = True
+score = 0
+
+def display_score():
+    score_surface = font.render(f"Score: {score}", True, BLACK)
+    screen.blit(score_surface, (10, 10))
+
+def reset_game():
+    global dino_rect, dino_gravity, cactus_rect, score, cactus_speed
+    dino_rect.midbottom = (80, SCREEN_HEIGHT - 40)
+    dino_gravity = 0
+    cactus_rect.midbottom = (SCREEN_WIDTH + 100, SCREEN_HEIGHT - 40)
+    score = 0
+    cactus_speed = 10
+
+def read_arduino_signal():
+    """Reads and processes signals from the Arduino."""
+    if arduino is None:
+        print("Arduino is not connected")
+        return False
+
+    # Continuously check the buffer to make sure we don't miss data
+    print(f"Data waiting in buffer: {arduino.in_waiting}")  # Debugging output
+    
+    if arduino.in_waiting > 0:  # Check if there's data to read
+        try:
+            signal = arduino.readline().decode('utf-8').strip()
+            print(f"Received signal from Arduino: {signal}")  # Debugging output
+            if signal == "jump":
+                print("Signal processed as jump")  # Confirm signal processed correctly
+                return True
+        except Exception as e:
+            print(f"Error reading from Arduino: {e}")
+    return False
+
+# Game loop
+running = True
+while running:
+    screen.fill(WHITE)
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+    if game_active:
+        # Continuously check if Arduino is sending the signal
+        if read_arduino_signal() and dino_rect.bottom >= SCREEN_HEIGHT - 40:
+            print("Dino is jumping!")  # Debugging output
+            dino_gravity = -15
+
+        # Dino movement
+        dino_gravity += 1
+        dino_rect.y += dino_gravity
+        if dino_rect.bottom >= SCREEN_HEIGHT - 40:
+            dino_rect.bottom = SCREEN_HEIGHT - 40
+
+        # Cactus movement
+        cactus_rect.x -= cactus_speed
+        if cactus_rect.right < 0:
+            cactus_rect.left = SCREEN_WIDTH + random.randint(100, 300)
+            score += 1
+            if score % 5 == 0:
+                cactus_speed += 1
+
+        # Collision detection
+        if dino_rect.colliderect(cactus_rect):
+            game_active = False
+
+        # Draw game elements
+        screen.blit(dino_img, dino_rect)
+        screen.blit(cactus_img, cactus_rect)
+        display_score()
+    else:
+        reset_game()
+
+    pygame.display.update()
+    clock.tick(FPS)
+
+pygame.quit()
+
